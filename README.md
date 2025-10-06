@@ -1,36 +1,67 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Cash Course – Financial Literacy Made Fun
+
+**Cash Course**  is a modern and interactive web application designed to empower youth with practical money management skills. Through a dynamic board game experience, Cash Course helps players master real-world financial decisions—budgeting, saving, investing, and more—in a fun, hands-on environment. Players learn how to build wealth, avoid debt traps, and make smart choices while competing with friends or practicing solo.
+
+By combining engaging game mechanics with essential financial concepts, Cash Course gives families, students, and teachers a powerful tool to build financial confidence from an early age. Whether you’re learning the basics or building advanced money skills, Cash Course puts your financial future in your hands.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Tech Stack](#tech-stack)
+- [Getting Started](#getting-started)
+- [Available Scripts](#available-scripts)
+
+---
+
+## Overview
+
+Auracle offers wearable wristband devices that connect seamlessly to smartphones, alerting emergency contacts at the first sign of a seizure. The system leverages advanced motion sensors and AI to detect seizures, differentiating between normal and seizure-induced movements, and can operate with or without manual input.
+
+## Tech Stack
+
+- **Framework:** [Next.js](https://nextjs.org/) (React 19)
+- **Styling:** [Tailwind CSS](https://tailwindcss.com/), [PostCSS](https://postcss.org/)
+
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- [Node.js](https://nodejs.org/) (v18+ recommended)
+- [npm]([https://pnpm.io/](https://github.com/npm)) 
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Installation
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. **Clone the repository:**
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+   ```bash
+   git clone https://github.com/sauravsid/auracle.git
+   cd auracle
+   ```
 
-## Learn More
+2. **Install dependencies:**
 
-To learn more about Next.js, take a look at the following resources:
+   ```bash
+   pnpm install
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+3. **Run the development server:**
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+   ```bash
+   pnpm run dev
+   ```
 
-## Deploy on Vercel
+   Open [http://localhost:3000](http://localhost:3000) to view the app.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+4. **Build for production:**
+   ```bash
+   pnpm build
+   pnpm start
+   ```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Available Scripts
+
+- `npm run dev` – Start the development server.
+- `npm run build` – Build the app for production.
+- `npm start` – Start the production server.
+
