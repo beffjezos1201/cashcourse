@@ -1,0 +1,1052 @@
+"use client"; 
+import React, { useMemo, useCallback } from 'react';
+
+// --- Constants ---
+const MIN_PLAYERS = 2;
+const MAX_PLAYERS = 4;
+
+// --- Types ---
+interface Space {
+  name: string;
+  type: 'Space' | 'Corner' | 'Special' | 'Budget' | 'Stock';
+  cost?: string; // e.g. "+$100", "-$50", "+10%", "-20%"
+  image?: string; // Emoji or icon representation
+  costSign?: 'positive' | 'negative' | 'neutral'; // For color coding
+  expenseType?: 'medical' | 'repair' | 'purchase'; // For expense handling
+  description?: string; // For special spaces
+}
+
+interface Player {
+  id: number;
+  tokenIndex: number; // Index into PLAYER_TOKENS
+  spaceIndex: number; // Current position on the board (0-39)
+  checking: number;
+  savings: number;
+  investments: number;
+  debt: number;
+  paycheck: number;
+  laps: number; // Number of times passed 'Go'
+  hasHealthInsurance: boolean; // For medical bill exemption
+  hasToolUp: boolean; // For repair exemption
+  hasCouponSavings: boolean; // For purchase exemption
+  debttrapActive: boolean; // If true, incurs extra debt on passing Go
+}
+
+interface GridPosition {
+  row: number;
+  col: number;
+  isCorner: boolean;
+  isSide: boolean;
+}
+const PLAYER_TOKENS = [
+  { emoji: '🚗', color: 'text-red-500' },
+  { emoji: '🚀', color: 'text-blue-500'},
+  { emoji: '🚢', color: 'text-green-500' },
+  { emoji: '🚲', color: 'text-yellow-500' },
+];
+const MONOPOLY_SPACES: Space[] = [
+  // Bottom Row (0 to 9)
+  { name: 'Collect Paycheck', type: 'Corner' },
+  { name: 'Savings Boost', type: 'Space', cost: "+$100", image:'🏦', costSign: 'positive'},
+  { name: 'Health Insurance', type: 'Special', image:'🩺', description: 'Stay covered! Skip your next medical expense.'},
+  { name: 'Impulse Buy', type: 'Space', cost: "-$75", image: '🛍️', costSign: 'negative', expenseType: 'purchase'},
+  { name: 'Medical Bill', type: 'Space', cost: "-$100", image: '🚑', costSign: 'negative', expenseType: 'medical'},
+  { name: 'Stock Dividend', type: 'Stock', cost: "+5%", image:'💹', costSign: 'positive'},
+  { name: 'ATM', type: 'Budget'},
+  { name: 'Tool Up', type: 'Special', image:'🛠️', description: 'Fix it on us! Dodge your next repair cost.' },
+  { name: 'Part-Time Job', type: 'Space', cost: "+$100", image:'💼', costSign: 'positive'},
+  { name: '+500 Debt', type: 'Corner', costSign: 'negative', cost: "+$50/lap until paid off" },
+
+  // Left Column (10 to 18)
+  { name: 'Market Boom', type: 'Stock', cost: "+20%", image:'📈', costSign: 'positive'},
+  { name: 'Lost Phone', type: 'Space', cost: "-$200", image:'📱', costSign: 'negative'},
+  { name: 'Charity Donation', type: 'Space', cost: "-$50", image: '❤️', costSign: 'negative'},
+  { name: 'Birthday Bash', type: 'Special', image:'🎉', description: 'Time to party! Receive $50 from all players'},
+  { name: 'Fraud Detected', type: 'Space', cost: "-$150", image:'🚨', costSign: 'negative'},
+  { name: 'Tax Refund', type: 'Space', cost: "+$100", image:'🧾', costSign: 'positive'},
+  { name: 'Side Hustle', type: 'Special', image: '💼', description: 'Work smarter, not harder! Earn $50 × your dice roll.'},
+  { name: 'Car Repair', type: 'Space', cost: "-$120", image:'🚗', costSign: 'negative', expenseType: 'repair'},
+  { name: 'ATM', type: 'Budget'},
+  { name: '+10% Savings', type: 'Corner', costSign: 'positive' },
+  // Top Row (19 to 27)
+  { name: 'Volatile Market', type: 'Special', image:'💹', description: 'The market swings! +$200 if your dice roll was even, -$200 if it was odd.'},
+  { name: 'Medical Bill', type: 'Space', cost: "-$200", image:'🚑', costSign: 'negative', expenseType: 'medical' },
+  { name: 'Coupon Savings', type: 'Special', image:'🏷️', description: 'Score big savings! Skip your next purchase.' },
+  { name: 'Scholarship', type: 'Space', cost: "+$200", image:'🎓', costSign: 'positive' },
+  { name: 'Impulse Buy', type: 'Space',  cost: "-$75", image:'🛍️', costSign: 'negative', expenseType: 'purchase' },
+  { name: 'Career Training', type: 'Special', image:'📚', description: 'Invest in yourself! Add $50 to your paycheck.'},
+  { name: 'Smart Investment', type: 'Stock', cost: "+10%", image:'📈', costSign: 'positive' },
+  { name: 'ATM', type: 'Budget'},
+  { name: '-10% Net Worth', type: 'Corner', costSign: 'negative' },
+
+  // Right Column (28 to 36) 
+  { name: 'Parking Ticket', type: 'Space', cost: "-$60", image:'🚓', costSign: 'negative' },
+  { name: 'Payday Bonus', type: 'Special', image:'💵', description: 'Cha-ching! Get an extra 10% of your paycheck.'},
+  { name: 'Car Repair', type: 'Space', cost: "-$120", image:'🚗', costSign: 'negative', expenseType: 'repair'},
+  { name: 'Utilities Bill', type: 'Space', cost: "-$150", image:'⚡', costSign: 'negative'},
+  { name: 'Lottery Win', type: 'Special', image:'🍀', description: 'Lady Luck smiles! Win $100 × your dice roll.' },
+  { name: 'ATM', type: 'Budget'},
+  { name: 'Market Crash', type: 'Stock', cost: '-25%' ,  image:'📉', costSign: 'negative'},
+  { name: 'Secret Santa', type: 'Special', image:'🎅', description: 'Spread the cheer! Pay $50 to each player.'},
+];
+
+// --- Space function 
+const getGridPosition = (index: number): GridPosition => {
+
+  //Bottom Row (0 to 9)
+  if (index >= 0 && index <= 9) {
+    return {
+      row: 10,
+      col: 10 - index,
+      isCorner: index === 0 || index === 9,
+      isSide: index > 0 && index < 9
+    };
+  }
+
+  //Left Column (10 to 18)
+  if (index >= 10 && index <= 18) {
+    return {
+      row: 10 - (index - 9), 
+      col: 1,
+      isCorner: index === 18,
+      isSide: index > 9 && index < 18
+    };
+  }
+
+  // Top Row (19 to 27)
+  if (index >= 19 && index <= 27) {
+    return {
+      row: 1,
+      col: index - 18, // R1, C2 to C11
+      isCorner: index === 27,
+      isSide: index > 19 && index < 27
+    };
+  }
+
+  // Right Column (28 to 36) 
+  if (index >= 28 && index <= 36) {
+    return {
+      row: index - 27,
+      col: 10,
+      isCorner: false,
+      isSide: true
+    };
+  }
+  return { row: 0, col: 0, isCorner: false, isSide: false };
+};
+// --- Sub-Component for the Welcome Modal ---
+interface WelcomeModalProps {
+  onSelect: (count: number) => void;
+}
+
+const WelcomeModal: React.FC<WelcomeModalProps> = ({ onSelect }) => {
+  const playerOptions = Array.from({ length: MAX_PLAYERS - MIN_PLAYERS + 1 }, (_, i) => i + MIN_PLAYERS);
+
+  return (
+      <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl p-8 w-full max-w-lg transform scale-100 transition duration-300">
+             <h2 className="text-3xl font-bold text-gray-800 mb-4 text-center">Welcome to Cash Course!</h2>
+      
+             <div className="text-gray-600 mb-6 text-sm">
+                <p className="font-semibold text-gray-700 mb-2">🎯 The Goal:</p>
+                <p className="mb-3">Build your wealth wisely while avoiding financial ruin.</p>
+        
+                <p className="font-semibold text-green-600 mb-1">✅ How to Win:</p>
+                <p className="mb-3">Be the first player to reach $10,000 net worth (checking + savings + investments - debt).</p>
+                
+                <p className="font-semibold text-red-600 mb-1">❌ How to Lose:</p>
+                <p className="mb-3">If your net worth becomes negative, you are bankrupt and the game ends.</p>
+        
+                <p className="font-semibold text-blue-600 mb-1">💡 Strategy Tips:</p>
+                <ul className="list-disc list-inside mb-4 space-y-1">
+                  <li>Diversify your money across checking, savings, and investments</li>
+                  <li>Pay down debt to avoid bankruptcy</li>
+                  <li>Use special spaces and budget wisely</li>
+                </ul>
+              </div>
+              
+      <p className="text-gray-700 font-medium mb-4 text-center">
+        Select the number of players to start your financial journey!
+      </p>
+      
+      <div className="grid grid-cols-3 gap-3 justify-center">
+          {playerOptions.map(count => (
+            <button
+              key={count}
+              onClick={() => onSelect(count)}
+              className="bg-red-600 text-white font-bold py-3 px-2 rounded-lg hover:bg-red-700 transition-colors shadow-md transform hover:scale-105"
+            >
+              {count} Players
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+// --- Sub-Component for Game Over Modal ---
+interface GameOverModalProps {
+  winner?: Player
+  loser?: Player
+  tokens: { emoji: string; color: string }[]
+  onPlayAgain: () => void
+}
+
+const GameOverModal: React.FC<GameOverModalProps> = ({ winner, loser, tokens, onPlayAgain }) => {
+  const calculateNetWorth = (player: Player): number => {
+    return player.checking + player.savings + player.investments - player.debt
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md transform scale-100 transition duration-300 border-4 border-green-400">
+        <div className="text-center">
+          {winner && (
+            <>
+              <div className="text-6xl mb-4">🎉</div>
+              <h2 className="text-3xl font-bold text-green-600 mb-2">Victory!</h2>
+              <p className="text-xl text-gray-700 mb-2">
+                Player {winner.id + 1} <span className={tokens[winner.tokenIndex].color}>{tokens[winner.tokenIndex].emoji}</span> wins!
+              </p>
+              <p className="text-lg text-green-600 font-semibold mb-6">
+                Final Net Worth: ${calculateNetWorth(winner).toLocaleString()}
+              </p>
+            </>
+          )}
+          
+          {loser && !winner && (
+            <>
+              <div className="text-6xl mb-4">💸</div>
+              <h2 className="text-3xl font-bold text-red-600 mb-2">Game Over</h2>
+              <p className="text-xl text-gray-700 mb-2">
+                Player {loser.id + 1} <span className={tokens[loser.tokenIndex].color}>{tokens[loser.tokenIndex].emoji}</span> went bankrupt!
+              </p>
+              <p className="text-lg text-red-600 font-semibold mb-6">
+                Final Net Worth: ${calculateNetWorth(loser).toLocaleString()}
+              </p>
+            </>
+          )}
+          
+          <button
+            onClick={onPlayAgain}
+            className="bg-green-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-green-700 transition-colors shadow-lg transform hover:scale-105"
+          >
+            Play Again
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+//Dice Display
+interface DiceProps {
+    die1: number;
+    die2: number;
+    onRoll: () => void;
+    currentPlayerToken: { emoji: string; color: string } | null;
+  isRolling?: boolean;
+}
+const DiceFace: React.FC<{ value: number }> = ({ value }) => (
+    <div className="w-8 h-8 sm:w-10 sm:h-10 bg-white border border-gray-400 flex items-center justify-center text-lg sm:text-xl font-bold shadow-inner rounded-md text-black">
+        {value}
+    </div>
+);
+
+const Dice: React.FC<DiceProps> = ({ die1, die2, onRoll, currentPlayerToken, isRolling = false }) => (
+    <div className="flex flex-col items-center mt-4">
+        {currentPlayerToken && (
+             <p className="text-xl font-bold mb-2 text-black">
+                Turn: <span className={currentPlayerToken.color}>{currentPlayerToken.emoji}</span>
+            </p>
+        )}
+        <div className="flex space-x-4 mb-4">
+            <DiceFace value={die1} />
+            <DiceFace value={die2} />
+        </div>
+    <button
+      onClick={onRoll}
+      className="bg-red-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-red-700 transition-colors shadow-lg transform hover:scale-105 disabled:bg-gray-400"
+      disabled={!currentPlayerToken || isRolling}
+    >
+      {isRolling ? 'Rolling...' : 'Roll Dice'}
+    </button>
+    </div>
+);
+// --- Sub-Component for a single space ---
+interface SpaceProps {
+  space: Space;
+  spaceIndex: number;
+  position: GridPosition;
+  tokensOnSpace: Player[];
+}
+const MonopolySpace: React.FC<SpaceProps> = ({ space, position, tokensOnSpace }) => {
+  const { name, type, cost} = space;
+  const { row, col, isCorner, isSide } = position;
+
+  const baseClasses = 'relative border border-green-400 bg-yellow-100 flex flex-col justify-between items-center text-center p-1 font-inter transition-all duration-300 hover:shadow-lg hover:z-10';
+  
+  const cornerClasses = isCorner ? 'p-2' : '';
+  const sideClasses = isSide ? 'p-0.5' : 'p-1';
+  
+  const tokenElements = tokensOnSpace.map(player => (
+    <span
+      key={player.id}
+      className={`text-lg sm:text-xl font-extrabold ${PLAYER_TOKENS[player.tokenIndex].color} drop-shadow-lg`}
+      title={`Player ${player.id + 1} (${PLAYER_TOKENS[player.tokenIndex].emoji})`}
+    >
+      {PLAYER_TOKENS[player.tokenIndex].emoji}
+    </span>
+  ));
+
+  const tokensContainer = tokensOnSpace.length > 0 ? (
+    <div className="absolute inset-x-0 bottom-0 p-1 flex justify-center items-center flex-wrap gap-1 bg-white/50 z-10">
+      {tokenElements}
+    </div>
+  ) : null;
+
+  const content = (
+    <div className={`flex flex-col w-full h-full ${isSide && (col === 1 || col === 11) ? 'justify-center' : 'justify-between'} `}>
+
+      {/* Main Content */}
+      <div className={`flex flex-col flex-grow items-center justify-center p-0.5 sm:p-1`}>
+        {(type === 'Space' || type === 'Special' || type == 'Stock') && <span className="font-bold text-sm sm:text-base text-black">{space.image}</span>}
+        {type === 'Budget' && <span className="font-bold text-sm sm:text-base text-gray-600">💳</span>}
+        {type === 'Corner' && name === 'Collect Paycheck' && <span className="font-bold text-3xl sm:text-5xl text-green-700">GO</span>}
+        {type === 'Corner' && name === '+500 Debt' && <span className="font-bold text-sm sm:text-xl text-red-500">Debt Trap</span>}
+        {type === 'Corner' && name === '+10% Savings' && <span className="font-bold text-sm sm:text-lg text-yellow-300">Savings Bonus</span>}
+        {type === 'Corner' && name === '-10% Net Worth' && <span className="font-bold text-sm sm:text-lg text-blue-400">Taxes Due</span>}
+
+        <p className={`font-semibold text-black text-xs ${isSide ? 'mt-1' : ''}`}>{name}</p>
+        {cost && (
+          <p className={`font-medium text-xs ${space.costSign === 'positive' ? 'text-green-400' : space.costSign === 'negative' ? 'text-red-400' : 'text-gray-600'}`}>
+            {cost}
+          </p>
+        )}
+         </div>
+     </div>
+  );
+
+  return (
+    <div
+      className={`${baseClasses} ${isCorner ? cornerClasses : sideClasses}`}
+      style={{ gridRowStart: row, gridColumnStart: col }}
+    >
+      {content}
+      {tokensContainer}
+    </div>
+  );
+};
+
+const calculateNetWorth = (player: Player): number => 
+  player.checking + player.savings + player.investments - player.debt;
+
+// --- Main App Component ---
+export default function App() {
+  const [showWelcomeModal, setShowWelcomeModal] = React.useState(true);
+  const [playerCount, setPlayerCount] = React.useState(0);
+  const [playerPositions, setPlayerPositions] = React.useState<Player[]>([]);
+  const [specialEvent, setSpecialEvent] = React.useState<{ active: boolean; playerId: number; spaceIndex: number } | null>(null);
+  const [budgetEvent, setBudgetEvent] = React.useState<{ active: boolean; playerId: number; spaceIndex: number } | null>(null);
+  const [gameOverEvent, setGameOverEvent] = React.useState<{ active: boolean; winner?: Player; loser?: Player } | null>(null)
+  const [die1, setDie1] = React.useState(1);
+  const [die2, setDie2] = React.useState(1);
+  const [rolling, setRolling] = React.useState(false);
+  const [currentPlayerId, setCurrentPlayerId] = React.useState(0);
+  // Calculate all 40 positions once
+  const boardLayout = useMemo(() => MONOPOLY_SPACES.map((space, index) => ({
+    space,
+    spaceIndex: index,
+    position: getGridPosition(index),
+  })), []);
+  
+  const endGame = useCallback(() => {
+    setShowWelcomeModal(true)
+    setPlayerCount(0)
+    setPlayerPositions([])
+    setCurrentPlayerId(0)
+    setDie1(1)
+    setDie2(1)
+    setGameOverEvent(null)
+  }, [])
+
+  const parseCost = useCallback((cost?: string) => {
+    if (!cost) return null;
+    const cleaned = cost.replace(/[^0-9-]/g, '');
+    const n = parseInt(cleaned, 10);
+    return n;
+  }, []);
+
+  const checkForEndGame = useCallback((players: Player[]) => {
+    if (!players.length) return
+
+    const winner = players.find(p => calculateNetWorth(p) >= 10000)
+    const loser = players.find(p => calculateNetWorth(p) < 0)
+
+    if (winner || loser) {
+      setTimeout(() => {
+        setGameOverEvent({ 
+          active: true, 
+          winner: winner, 
+          loser: loser 
+        })
+      }, 1000)
+    }
+  }, [])
+
+  // Handle landing effects 
+  const handleSpaceLanding = useCallback((space: Space, player: Player) => {
+    // Default deltas
+    const deltas = { checking: 0, savings: 0, investments: 0, debt: 0 };
+
+    if (space.type === 'Space') {
+      const amt = parseCost(space.cost);
+      if (amt !== null) {
+        // Credits
+        if (amt >= 0) {
+          deltas.checking += amt;
+        } else {
+          // Expenses
+          if (space.expenseType === 'medical' && player.hasHealthInsurance) {
+            player.hasHealthInsurance = false;
+            return deltas;
+          }
+          if (space.expenseType === 'repair' && player.hasToolUp) {
+            player.hasToolUp = false;
+            return deltas;
+          }
+          if (space.expenseType === 'purchase' && player.hasCouponSavings) {
+            player.hasCouponSavings = false;
+            return deltas;
+          }
+          const cost = Math.abs(amt);
+          if (player.checking >= cost) {
+            deltas.checking -= cost;
+          } else {
+            const shortfall = cost - player.checking;
+            deltas.checking -= player.checking;
+            deltas.debt += shortfall;
+          }
+        }
+      }
+    } else if (space.type === 'Budget') {
+      // Budget spaces could present a choice; default no-op (placeholder)
+      // Example: could set deltas.checking += 0;
+    } else if (space.type === 'Stock') {
+      const pct = parseCost(space.cost); 
+      if (pct !== null && player.investments) {
+        deltas.investments += Math.round(player.investments * (pct / 100));
+      }
+   } else if (space.type === 'Corner') {
+      switch (space.name) {
+        case '+500 Debt': {
+          // Player immediately takes on $500 debt
+          deltas.debt += 500;
+          player.debttrapActive = true; 
+        }
+        case '+10% Savings': {
+          deltas.savings += Math.round(player.savings * 0.1); 
+          break;
+        }
+        case '-10% Net Worth': {
+          // Player immediately loses 10% of their total net worth
+          const netWorth = calculateNetWorth(player);
+          if (netWorth > 0) {
+            const tax = Math.round(netWorth * 0.1);
+            if (player.checking >= tax) {
+              deltas.checking -= tax;
+            } else {
+              const shortfall = tax - player.checking;
+              deltas.checking -= player.checking; // checking goes to 0
+              deltas.debt += shortfall; // take on debt for the remainder
+            } 
+          }
+          break;
+        }
+        default:
+          break;
+      }
+    }
+
+    return deltas;
+  }, [parseCost]);
+  
+ // Dice roll 
+  const rollDice = useCallback(async () => {
+  if (playerCount === 0 || specialEvent?.active || budgetEvent?.active || gameOverEvent?.active || rolling) return
+    setRolling(true);
+
+    const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+    // Dice spin animation
+    const spinDuration = 900; // ms
+    const spinInterval = 80; // ms
+    const spinStart = Date.now();
+
+    const spinTimer = setInterval(() => {
+      setDie1(Math.floor(Math.random() * 6) + 1);
+      setDie2(Math.floor(Math.random() * 6) + 1);
+    }, spinInterval);
+
+    // wait for spinDuration
+    while (Date.now() - spinStart < spinDuration) {
+      await sleep(spinInterval);
+    }
+    clearInterval(spinTimer);
+
+    // Final dice values
+    const finalD1 = Math.floor(Math.random() * 6) + 1;
+    const finalD2 = Math.floor(Math.random() * 6) + 1;
+    setDie1(finalD1);
+    setDie2(finalD2);
+
+    const totalRoll = finalD1 + finalD2;
+    const nextPlayerId = (currentPlayerId + 1) % playerCount;
+
+    // Animate token movement step-by-step
+    const moveDelay = 160; // ms per step
+    const steps = totalRoll;
+    for (let step = 1; step <= steps; step++) {
+      setPlayerPositions(prev => prev.map(p => {
+        if (p.id !== currentPlayerId) return p;
+        const len = MONOPOLY_SPACES.length;
+        const prevIndex = p.spaceIndex;
+        const newIndex = (prevIndex + 1) % len;
+        let newChecking = p.checking;
+        let newLaps = p.laps;
+        let newDebt = p.debt;
+
+        // If we wrapped (new index <= prev), count as a lap
+        if (newIndex <= prevIndex) {
+          newLaps = p.laps + 1;
+          newChecking = p.checking + p.paycheck;
+          if (p.debttrapActive) newDebt = p.debt + 50;
+        }
+
+        return { ...p, spaceIndex: newIndex, checking: newChecking, laps: newLaps, debt: newDebt };
+      }));
+
+      // wait between steps to show motion
+      await sleep(moveDelay);
+    }
+
+    // After movement, apply landing effects once
+    setPlayerPositions(prev => {
+      const updatedPlayers = prev.map(p => {
+        if (p.id !== currentPlayerId) return p
+        
+        const landedSpace = MONOPOLY_SPACES[p.spaceIndex]
+        const deltas = handleSpaceLanding(landedSpace, p)
+        
+        // If landing is special or budget, open the appropriate modal
+        if (landedSpace.type === 'Special') {
+          setSpecialEvent({ active: true, playerId: currentPlayerId, spaceIndex: p.spaceIndex })
+        }
+        if (landedSpace.type === 'Budget') {
+          setBudgetEvent({ active: true, playerId: currentPlayerId, spaceIndex: p.spaceIndex })
+        }
+        
+        return {
+          ...p,
+          checking: Math.max(p.checking + deltas.checking, 0),
+          savings: Math.max(p.savings + deltas.savings, 0),
+          investments: Math.max(p.investments + deltas.investments, 0),
+          debt: Math.max(p.debt + deltas.debt, 0)
+        }
+      })
+      
+      // Check for end game after updating positions
+      checkForEndGame(updatedPlayers)
+      
+      return updatedPlayers
+    })
+    
+    // Advance turn
+    setCurrentPlayerId(nextPlayerId)
+    
+    // Keep rolling locked briefly to avoid immediate re-roll if modal opened (we leave rolling true until modal closes)
+    // If no modal opened, clear rolling after short delay
+    setTimeout(() => setRolling(false), 300)
+    
+}, [playerCount, currentPlayerId, specialEvent?.active, budgetEvent?.active, gameOverEvent?.active, rolling, handleSpaceLanding, checkForEndGame])
+
+
+// Budget modal 
+
+interface BudgetModalProps {
+  event: { active: boolean; playerId: number; spaceIndex: number } | null;
+  players: Player[];
+  onClose: () => void;
+  onApply: (playerId: number, from: MoneyKey, to: MoneyKey, amount: number) => void;
+  onPayDebt: (playerId: number, amount: number) => void;
+}
+
+const BudgetModal: React.FC<BudgetModalProps> = ({ event, players, onClose, onApply, onPayDebt }) => {
+  const [mode, setMode] = React.useState<'transfer' | 'payDebt'>('transfer');
+  const [from, setFrom] = React.useState<'checking' | 'savings' | 'investments'>('checking');
+  const [to, setTo] = React.useState<'checking' | 'savings' | 'investments'>('savings');
+  const [amount, setAmount] = React.useState(0);
+
+  if (!event || !event.active) return null;
+  const player = players[event.playerId];
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md transform scale-100 transition duration-300 border-4 border-yellow-300">
+        <h2 className="text-2xl font-extrabold text-yellow-700 mb-3 text-center">ATM</h2>
+
+        <div className="space-y-3">
+          <div className="flex text-black items-center justify-center space-x-4">
+            <label className={`px-3 py-1 rounded cursor-pointer ${mode === 'transfer' ? 'bg-yellow-200' : ''}`}>
+              <input className="mr-2" type="radio" name="budgetMode" checked={mode === 'transfer'} onChange={() => setMode('transfer')} />
+              Transfer
+            </label>
+            <label className={`px-3 py-1 rounded cursor-pointer ${mode === 'payDebt' ? 'bg-yellow-200' : ''}`}>
+              <input className="mr-2" type="radio" name="budgetMode" checked={mode === 'payDebt'} onChange={() => setMode('payDebt')} />
+              Pay Debt
+            </label>
+          </div>
+
+          {mode === 'transfer' && (
+            <>
+              <div>
+                <p className="text-sm text-gray-700">Move money between your accounts.</p>
+              </div>
+              <div className="flex text-black justify-between text-sm">
+                <label className="font-medium">From:</label>
+                <select value={from} onChange={e => setFrom(e.target.value as 'checking' | 'savings' | 'investments')} className="ml-2 border rounded px-2">
+                  <option value="checking">Checking (${player.checking})</option>
+                  <option value="savings">Savings (${player.savings})</option>
+                  <option value="investments">Investments (${player.investments})</option>
+                </select>
+              </div>
+
+              <div className="flex text-black justify-between text-sm">
+                <label className="font-medium">To:</label>
+                <select value={to} onChange={e => setTo(e.target.value as 'checking' | 'savings' | 'investments')} className="ml-2 border rounded px-2">
+                  <option value="checking">Checking</option>
+                  <option value="savings">Savings</option>
+                  <option value="investments">Investments</option>
+                </select>
+              </div>
+
+              <div className="flex text-black justify-between items-center">
+                <label className="font-medium">Amount:</label>
+                <input type="number" value={amount} onChange={e => setAmount(Number(e.target.value))} className="ml-2 border rounded px-2 w-28" />
+              </div>
+            </>
+          )}
+
+          {mode === 'payDebt' && (
+            <>
+              <div className="text-black text-left text-sm">
+                <p className="text-sm text-gray-600">Use checking to pay down your debt.</p>
+                <p className="font-medium">Debt: ${player.debt.toLocaleString()}</p>
+              </div>
+              <div className="flex text-black justify-between items-center">
+                <label className="font-medium">Amount to pay:</label>
+                <input type="number" value={amount} onChange={e => setAmount(Number(e.target.value))} className="ml-2 border rounded px-2 w-28" />
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="flex space-x-3 mt-4">
+          {mode === 'transfer' ? (
+            <button
+              onClick={() => { onApply(event.playerId, from, to, amount); }}
+              className="flex-1 bg-yellow-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-yellow-600 transition-colors"
+            >
+              Transfer
+            </button>
+          ) : (
+            <button
+              onClick={() => { onPayDebt(event.playerId, amount); }}
+              className="flex-1 bg-yellow-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-yellow-600 transition-colors"
+            >
+              Pay Debt
+            </button>
+          )}
+
+          <button
+            onClick={onClose}
+            className="flex-1 bg-gray-200 text-gray-800 font-semibold py-2 px-4 rounded-lg hover:bg-gray-300 transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Apply budget transfer
+type MoneyKey = 'checking' | 'savings' | 'investments';
+
+const applyBudgetTransfer = useCallback(
+  (playerId: number, from: MoneyKey, to: MoneyKey, amount: number) => {
+    setPlayerPositions(prev => {
+      const updatedPlayers = prev.map(p => {
+        if (p.id !== playerId) return p;
+        const avail = p[from];
+        const transfer = Math.max(0, Math.min(avail, Math.round(amount || 0)));
+        const next = { ...p };
+        next[from] = avail - transfer;
+        next[to] = p[to] + transfer;
+        return next;
+      });
+
+      // Check for end game after budget transfer
+      checkForEndGame(updatedPlayers);
+
+      return updatedPlayers;
+    });
+    setBudgetEvent(null);
+  },
+  [setPlayerPositions, checkForEndGame]
+);
+  
+// Pay off debt using checking (clamps to available checking)
+const applyPayOffDebt = useCallback((playerId: number, amount: number) => {
+    setPlayerPositions(prev => {
+      const updatedPlayers = prev.map(p => {
+        if (p.id !== playerId) return p
+        const pay = Math.max(0, Math.min(p.checking, Math.round(amount || 0)))
+        const newDebt = Math.max(0, p.debt - pay)
+        return {
+          ...p,
+          checking: p.checking - pay,
+          debt: newDebt,
+          debttrapActive: newDebt === 0 ? false : p.debttrapActive
+        }
+      })
+      
+      // Check for end game after paying debt
+      checkForEndGame(updatedPlayers)
+      
+      return updatedPlayers
+    })
+    setBudgetEvent(null)
+  }, [setPlayerPositions, checkForEndGame])
+// --- Sub-Component for Special-space Modal ---
+interface SpecialModalProps {
+  event: { active: boolean; playerId: number; spaceIndex: number } | null;
+  spaces: Space[];
+  tokens: { emoji: string; color: string }[];
+  onClose: () => void;
+  onApply: (spaceIndex: number, playerId: number) => void;
+}
+
+const SpecialModal: React.FC<SpecialModalProps> = ({ event, spaces, tokens, onClose, onApply }) => {
+  if (!event || !event.active) return null;
+
+  const { playerId, spaceIndex } = event;
+  const space = spaces[spaceIndex];
+  const playerToken = tokens[playerId % tokens.length];
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md transform scale-100 transition duration-300 border-4 border-indigo-500">
+        <h2 className="text-2xl font-extrabold text-indigo-700 mb-3 text-center">
+          {space.name}
+        </h2>
+
+        <div className="text-center mb-4">
+          <p className="text-lg font-semibold text-gray-700 mb-2">
+            Player {playerId + 1} <span className={playerToken.color}>{playerToken.emoji}</span>
+          </p>
+          <p className="text-base text-gray-800 bg-white p-3 rounded-lg border border-indigo-100">
+            {space.description}
+          </p>
+        </div>
+        <div className="flex space-x-3 mt-4">
+          <button
+            onClick={() => { onApply(spaceIndex, playerId); onClose(); }}
+            className="flex-1 bg-indigo-500 text-white font-semibold py-2 px-4 rounded-lg hover:bg-indigo-600 transition-colors"
+          >
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Apply a special space action. This function contains placeholders you can expand per-space.
+const applySpecialAction = useCallback((spaceIndex: number, playerId: number) => {
+  const space = MONOPOLY_SPACES[spaceIndex];
+
+  setPlayerPositions(prev => {
+    // Clone players to mutate locally
+    const updated = prev.map(p => ({ ...p }));
+    const actorIndex = updated.findIndex(p => p.id === playerId);
+    if (actorIndex === -1) return prev;
+
+    const actor = updated[actorIndex];
+
+    switch (space.name) {
+      case 'Birthday Bash': {
+        let totalCollected = 0;
+        for (const p of updated) {
+          if (p.id === playerId) continue;
+          const pay = Math.min(50, p.checking);
+          const shortfall = 50 - pay;
+          p.checking = p.checking - pay;
+          if (shortfall > 0) p.debt += shortfall;
+          totalCollected += 50;
+        }
+        actor.checking += totalCollected;
+        break;
+      }
+      case 'Payday Bonus': {
+        actor.checking += Math.round(actor.paycheck * 0.1);
+        break;
+      }
+      case 'Lottery Win': {
+        actor.checking += (die1 + die2) * 100;
+        break;
+      }
+      case 'Volatile Market': {
+        if (((die1 + die2) % 2) === 0) actor.checking += 200;
+        else actor.checking -= 200;
+        break;
+      }
+      case 'Secret Santa': {
+        // Actor pays $50 to each other player. If actor can't fully pay, actor takes on debt for the shortfall and recipients receive what is paid.
+        for (const p of updated) {
+          if (p.id === playerId) continue;
+          const pay = Math.min(50, actor.checking);
+          actor.checking -= pay;
+          p.checking += pay;
+          if (pay < 50) actor.debt += (50 - pay);
+        }
+        break;
+      }
+      case 'Side Hustle': {
+        actor.checking += (die1 + die2) * 50;
+        break;
+      }
+      case 'Career Training': {
+        actor.paycheck += 50;
+        break;
+      }
+      case 'Coupon Savings': {
+        // Mark that the player has coupon savings (one-time flag)
+        actor.hasCouponSavings = true;
+        break;
+      }
+      case 'Health Insurance': {
+        actor.hasHealthInsurance = true;
+        break;
+      }
+      case 'Tool Up': {
+        actor.hasToolUp = true;
+        break;
+      }
+    }
+    // Check for end game after special action
+      checkForEndGame(updated)
+      
+      return updated
+    })
+
+    // Close the modal after applying
+    setSpecialEvent(null)
+  }, [die1, die2, setPlayerPositions, checkForEndGame])
+
+// --- Sub-Component for Player Status and Money ---
+interface PlayerStatusProps {
+    players: Player[];
+    currentPlayerId: number;
+    tokens: { emoji: string; color: string }[];
+}
+
+const PlayerStatus: React.FC<PlayerStatusProps> = ({ players, currentPlayerId, tokens }) => {
+    
+    // Helper function to calculate Net Worth
+    const calculateNetWorth = (player: Player) => 
+        player.checking + player.savings + player.investments - player.debt;
+
+    // Helper to render the account details
+    const AccountDetail: React.FC<{ label: string; amount: number; isDebt?: boolean }> = ({ label, amount, isDebt = false }) => (
+        <div className="flex justify-between text-sm text-gray-700">
+            <span className="font-medium">{label}:</span>
+            <span className={`font-semibold ${isDebt ? 'text-red-600' : 'text-green-600'}`}>
+                ${amount.toLocaleString()}
+            </span>
+        </div>
+    );
+
+    return (
+        <div
+          className="absolute top-4 left-4 z-20 w-64 bg-yellow-100 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-200 p-4 max-h-[calc(100vh-2rem)] overflow-y-auto"
+        >
+            <h3 className="text-xl font-extrabold text-gray-800 border-b pb-2 mb-2">Accounts</h3>
+            <div className="space-y-4">
+                {players.map(player => {
+                    const netWorth = calculateNetWorth(player);
+
+                    return (
+                        <div 
+                            key={player.id}
+                            className={`p-3 rounded-xl transition-all duration-200 shadow-lg ${
+                                player.id === currentPlayerId 
+                                ? 'bg-blue-100 border-2 border-blue-500 scale-[1.02]' 
+                                : 'bg-gray-50 border border-gray-200'
+                            }`}
+                        >
+                            {/* Player Token and ID */}
+                            <div className="flex items-center space-x-2 border-b border-gray-300 pb-2 mb-2">
+                                <span className={`text-2xl font-extrabold ${tokens[player.tokenIndex].color}`}>{tokens[player.tokenIndex].emoji}</span>
+                                <span className="font-extrabold text-gray-800">
+                                    Player {player.id + 1}
+                                </span>
+                            </div>
+
+                            {/* Account Details */}
+                            <div className="space-y-1 my-2">
+                                <AccountDetail label="Paycheck" amount={player.paycheck} />
+                                <AccountDetail label="Checking" amount={player.checking} />
+                                <AccountDetail label="Savings" amount={player.savings} />
+                                <AccountDetail label="Investments" amount={player.investments} />
+                                <AccountDetail label="Debt" amount={player.debt} isDebt={true} />
+                            </div>
+
+                            {/* Net Worth Summary */}
+                            <div className="border-t border-gray-300 pt-2 mt-2 flex justify-between items-center">
+                                <span className="font-extrabold text-base text-gray-800">Net Worth:</span>
+                                <span className={`text-xl font-extrabold ${netWorth >= 0 ? 'text-green-800' : 'text-red-800'}`}>
+                                    ${netWorth.toLocaleString()}
+                                </span>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+};
+  
+  // Function to handle player selection and initialize game state
+    const handlePlayerSelect = (count: number) => {
+    const newPositions: Player[] = Array.from({ length: count }, (_, i) => ({
+      id: i,
+      tokenIndex: i,
+      spaceIndex: 0,
+      checking: 1000,
+      savings: 0,
+      investments: 0,
+      debt: 0,
+      paycheck: 200,
+      laps: 0,
+      hasToolUp: false,
+      hasHealthInsurance: false,
+      hasCouponSavings: false,
+      debttrapActive: false,
+    }));
+    setPlayerCount(count);
+    setPlayerPositions(newPositions);
+    setShowWelcomeModal(false);
+    setCurrentPlayerId(0); 
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-900 flex justify-center items-center p-4 sm:p-8">
+    {specialEvent?.active && (
+      <SpecialModal
+        event={specialEvent}
+        spaces={MONOPOLY_SPACES}
+        tokens={PLAYER_TOKENS}
+        onClose={() => setSpecialEvent(null)}
+        onApply={(spaceIndex, playerId) => applySpecialAction(spaceIndex, playerId)}
+      />
+    )}
+    {budgetEvent?.active && (
+        <BudgetModal
+          event={budgetEvent}
+          players={playerPositions}
+          onClose={() => setBudgetEvent(null)}
+          onApply={applyBudgetTransfer}
+          onPayDebt={applyPayOffDebt}
+        />
+      )}
+      {gameOverEvent?.active && (
+        <GameOverModal
+          winner={gameOverEvent.winner}
+          loser={gameOverEvent.loser}
+          tokens={PLAYER_TOKENS}
+          onPlayAgain={endGame}
+        />
+      )}
+      {showWelcomeModal && <WelcomeModal onSelect={handlePlayerSelect} />}
+
+  <div className="shadow-2xl rounded-lg border-4 border-green-400 bg-white opacity-100 transition-all duration-500">
+        {/* Player Staus*/}
+        {playerCount > 0 && (
+          <PlayerStatus
+            players={playerPositions}
+            currentPlayerId={currentPlayerId}
+            tokens={PLAYER_TOKENS}
+          />
+        )}
+        
+        {/* Board Grid */}
+        <div
+          className="grid relative"
+          style={{
+            gridTemplateColumns: '135px repeat(8, 80px) 135px',
+            gridTemplateRows: '135px repeat(8, 80px) 135px',
+            width: '910px',
+            height: '910px',
+          }}
+        >
+          {/* Spaces */}
+          {boardLayout.map((item) => {
+            const tokensOnSpace = playerPositions.filter(p => p.spaceIndex === item.spaceIndex);
+
+            return (
+              <MonopolySpace 
+                key={item.spaceIndex} 
+                space={item.space} 
+                spaceIndex={item.spaceIndex}
+                position={item.position} 
+                tokensOnSpace={tokensOnSpace}
+              />
+            );
+          })}
+
+          {/* Center Area */}
+          <div className="col-start-2 col-span-8 row-start-2 row-span-8 flex flex-col justify-between items-center bg-yellow-100 border-3 border-green-400  text-gray-800 p-6">
+            <div className="flex flex-col items-center justify-center flex-1">
+              <h1 className="text-5xl font-extrabold text-green-600 tracking-wider">CASH COURSE</h1>
+              <p className="text-black text-lg mt-2 font-semibold">Where Every Turn Pays Off.</p>
+              {playerCount > 0 && (
+                <Dice 
+                  die1={die1} 
+                  die2={die2} 
+                  onRoll={rollDice} 
+                  currentPlayerToken={PLAYER_TOKENS[playerPositions.find(p => p.id === currentPlayerId)?.tokenIndex || 0]}
+                  isRolling={rolling}
+                />
+              )}
+            </div>
+
+            {playerCount > 0 && (
+              <div className="w-full flex justify-center pb-4">
+                <button
+                  onClick={endGame}
+                  className="bg-gray-800 text-white font-semibold py-2 px-4 rounded-lg hover:bg-gray-700 transition-colors shadow-md"
+                >
+                  End Game
+                </button>
+              </div>
+            )}
+          </div>
+        {/* Tailwind should be configured via your project's tailwind.config.js / postcss setup.
+            Avoid injecting CDN scripts or inline config from components. */}
+      </div>
+    </div>
+  </div>
+  );
+}
