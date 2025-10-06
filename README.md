@@ -13,10 +13,6 @@ By combining engaging game mechanics with essential financial concepts, Cash Cou
 
 ---
 
-## Overview
-
-Auracle offers wearable wristband devices that connect seamlessly to smartphones, alerting emergency contacts at the first sign of a seizure. The system leverages advanced motion sensors and AI to detect seizures, differentiating between normal and seizure-induced movements, and can operate with or without manual input.
-
 ## Tech Stack
 
 - **Framework:** [Next.js](https://nextjs.org/) (React 19)
