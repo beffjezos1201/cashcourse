@@ -35,28 +35,28 @@ Auracle offers wearable wristband devices that connect seamlessly to smartphones
 1. **Clone the repository:**
 
    ```bash
-   git clone https://github.com/sauravsid/auracle.git
-   cd auracle
+   git clone https://github.com/beffjezos1201/cashcourse.git
+   cd cashcourse
    ```
 
 2. **Install dependencies:**
 
    ```bash
-   pnpm install
+   npm install
    ```
 
 3. **Run the development server:**
 
    ```bash
-   pnpm run dev
+   npm run dev
    ```
 
    Open [http://localhost:3000](http://localhost:3000) to view the app.
 
 4. **Build for production:**
    ```bash
-   pnpm build
-   pnpm start
+   npm run build
+   npm start
    ```
 
 ## Available Scripts
